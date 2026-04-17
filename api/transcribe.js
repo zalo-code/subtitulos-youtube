@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   try {
     // 1. Iniciar descarga
     const mp3Res = await fetch(
-      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=false&no_merge=false&audio_language=en`,
+      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=1&no_merge=false&audio_language=en`,
       {
         headers: {
           'Content-Type': 'application/json',
