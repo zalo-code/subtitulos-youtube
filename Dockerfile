@@ -1,0 +1,12 @@
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y python3 ffmpeg && \
+    pip3 install yt-dlp --break-system-packages
+
+WORKDIR /app
+COPY package.json .
+RUN npm install
+COPY . .
+
+EXPOSE 3000
+CMD ["node", "server.js"]
