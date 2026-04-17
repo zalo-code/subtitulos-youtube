@@ -19,7 +19,7 @@ app.post('/api/transcribe', async (req, res) => {
 
   try {
     // 1. Enviar a AssemblyAI
-    const submitRes = await fetch('https://api.assemblyai.com/v3/transcript', {
+    const submitRes = await fetch('https://api.assemblyai.com/v2/transcript', {
       method: 'POST',
       headers: {
         'Authorization': process.env.ASSEMBLYAI_KEY,
@@ -28,6 +28,7 @@ app.post('/api/transcribe', async (req, res) => {
       body: JSON.stringify({
       audio_url: videoUrl,
       language_code: 'ca',
+      speech_models: ['universal-2'],
     }),
     });
     const submitData = await submitRes.json();
@@ -40,7 +41,7 @@ app.post('/api/transcribe', async (req, res) => {
     let transcript = null;
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 10000));
-      const pollRes = await fetch(`https://api.assemblyai.com/v3/transcript/${transcriptId}`, {
+      const pollRes = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
         headers: { 'Authorization': process.env.ASSEMBLYAI_KEY },
       });
       const pollData = await pollRes.json();
