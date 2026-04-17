@@ -1,6 +1,5 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import FormData from 'form-data';
 
 const app = express();
 app.use(express.json());
@@ -15,7 +14,7 @@ app.use(express.static('.'));
 
 app.post('/api/transcribe', async (req, res) => {
   const { videoId, startTime = 0 } = req.body;
-  console.log('Procesando videoId:', videoId, 'startTime:', startTime);
+  console.log('Procesando:', videoId, 'desde:', startTime);
 
   try {
     // 1. Iniciar descarga
@@ -30,8 +29,6 @@ app.post('/api/transcribe', async (req, res) => {
       }
     );
     const mp3Data = await mp3Res.json();
-    console.log('MP3 response:', JSON.stringify(mp3Data).substring(0, 200));
-    
     const progressUrl = mp3Data.progress_url;
     if (!progressUrl) throw new Error('Sin progress_url: ' + JSON.stringify(mp3Data));
 
@@ -42,46 +39,48 @@ app.post('/api/transcribe', async (req, res) => {
       const progressRes = await fetch(progressUrl);
       const progressData = await progressRes.json();
       console.log('Progress:', progressData.text, progressData.progress);
-      
       if (progressData.success === 1 && progressData.download_url) {
         audioUrl = progressData.download_url;
-        console.log('Audio URL obtenida:', audioUrl);
         break;
       }
     }
-    if (!audioUrl) throw new Error('Timeout esperando audio en trozo ' + startTime);
+    if (!audioUrl) throw new Error('Timeout en trozo ' + startTime);
 
     // 3. Descargar audio
-    console.log('Descargando audio...');
+    console.log('Descargando audio:', audioUrl);
     const audioRes = await fetch(audioUrl);
-    if (!audioRes.ok) throw new Error('Error descargando audio: ' + audioRes.status);
     const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-    console.log('Audio descargado, tamaño:', audioBuffer.length, 'bytes');
+    console.log('Audio descargado:', audioBuffer.length, 'bytes');
 
-    // 4. Enviar a Groq Whisper
+    // 4. Enviar a Groq con boundary manual
+    const boundary = '----FormBoundary' + Math.random().toString(36);
+    const bodyParts = [];
+    bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3\r\n`));
+    bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\nca\r\n`));
+    bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="task"\r\n\r\ntranslate\r\n`));
+    bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\nverbose_json\r\n`));
+    bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n`));
+    bodyParts.push(audioBuffer);
+    bodyParts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+    const body = Buffer.concat(bodyParts);
+
     console.log('Enviando a Groq...');
-    const formData = new FormData();
-    formData.append('file', audioBuffer, { filename: 'audio.mp3', contentType: 'audio/mpeg' });
-    formData.append('model', 'whisper-large-v3');
-    formData.append('language', 'ca');
-    formData.append('task', 'translate');
-    formData.append('response_format', 'verbose_json');
-
     const groqRes = await fetch(
       'https://api.groq.com/openai/v1/audio/transcriptions',
       {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          ...formData.getHeaders()
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
         },
-        body: formData,
+        body,
       }
     );
     const groqData = await groqRes.json();
-    console.log('Groq respuesta:', JSON.stringify(groqData).substring(0, 300));
+    console.log('Groq:', JSON.stringify(groqData).substring(0, 300));
 
-    if (groqData.error) throw new Error('Groq error: ' + groqData.error.message);
+    if (groqData.error) throw new Error('Groq error: ' + JSON.stringify(groqData.error));
 
     const segments = (groqData.segments || []).map(s => ({
       start: s.start + startTime,
@@ -89,7 +88,7 @@ app.post('/api/transcribe', async (req, res) => {
       text: s.text,
     }));
 
-    console.log('Segmentos generados:', segments.length);
+    console.log('Segmentos:', segments.length);
     res.json({ segments, nextStart: startTime + 600 });
 
   } catch (error) {
