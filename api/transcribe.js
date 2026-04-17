@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     const progressUrl = mp3Data.progress_url;
     if (!progressUrl) throw new Error('Sin progress_url: ' + JSON.stringify(mp3Data));
 
-    // 2. Esperar audio
+    // 2. Esperar hasta que el audio esté listo
     let audioUrl = null;
     for (let i = 0; i < 20; i++) {
       await new Promise(r => setTimeout(r, 3000));
@@ -35,18 +35,19 @@ export default async function handler(req, res) {
     }
     if (!audioUrl) throw new Error('Timeout en trozo ' + startTime);
 
-    // 3. Descargar audio
+    // 3. Descargar el audio
     const audioRes = await fetch(audioUrl);
     const audioBuffer = await audioRes.arrayBuffer();
     const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
 
-    // 4. Transcribir con Groq
+    // 4. Transcribir con Groq Whisper en español
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.mp3');
     formData.append('model', 'whisper-large-v3');
     formData.append('language', 'ca');
     formData.append('task', 'translate');
     formData.append('response_format', 'verbose_json');
+    formData.append('prompt', 'Translate from Catalan to Spanish.');
 
     const groqRes = await fetch(
       'https://api.groq.com/openai/v1/audio/transcriptions',
@@ -57,12 +58,12 @@ export default async function handler(req, res) {
       }
     );
     const groqData = await groqRes.json();
-    
-    // Ajustar timestamps al tiempo real del vídeo
+
+    // 5. Ajustar timestamps al tiempo real del vídeo
     const segments = (groqData.segments || []).map(s => ({
-      ...s,
       start: s.start + startTime,
       end: s.end + startTime,
+      text: s.text,
     }));
 
     res.status(200).json({ segments, nextStart: startTime + 600 });
