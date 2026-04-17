@@ -1,6 +1,6 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import youtubeDl from 'youtube-dl-exec';
+import { execSync } from 'child_process';
 import { createReadStream, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -24,18 +24,13 @@ app.post('/api/transcribe', async (req, res) => {
   try {
     // 1. Descargar audio con yt-dlp
     console.log('Descargando con yt-dlp...');
-    await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
-      extractAudio: true,
-      audioFormat: 'mp3',
-      audioQuality: '128K',
-      output: outputPath,
-      noPlaylist: true,
-      postprocessorArgs: `ffmpeg:-ss ${startTime} -t 600`,
-    });
-    console.log('Audio descargado en:', outputPath);
+    execSync(
+      `yt-dlp -x --audio-format mp3 --audio-quality 128K --download-sections "*${startTime}-${startTime + 600}" --force-keyframes-at-cuts -o "${outputPath}" "https://www.youtube.com/watch?v=${videoId}"`,
+      { timeout: 180000 }
+    );
+    console.log('Audio descargado:', outputPath);
 
-    // 2. Enviar a Groq Whisper
-    const boundary = '----FormBoundary' + Math.random().toString(36);
+    // 2. Leer audio
     const audioBuffer = await new Promise((resolve, reject) => {
       const chunks = [];
       const stream = createReadStream(outputPath);
@@ -43,7 +38,10 @@ app.post('/api/transcribe', async (req, res) => {
       stream.on('end', () => resolve(Buffer.concat(chunks)));
       stream.on('error', reject);
     });
+    console.log('Audio leído:', audioBuffer.length, 'bytes');
 
+    // 3. Enviar a Groq Whisper
+    const boundary = '----FormBoundary' + Math.random().toString(36);
     const bodyParts = [];
     bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3\r\n`));
     bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\nca\r\n`));
@@ -68,7 +66,7 @@ app.post('/api/transcribe', async (req, res) => {
       }
     );
     const groqData = await groqRes.json();
-    console.log('Groq:', JSON.stringify(groqData).substring(0, 300));
+    console.log('Groq respuesta:', JSON.stringify(groqData).substring(0, 300));
 
     if (groqData.error) throw new Error('Groq error: ' + JSON.stringify(groqData.error));
 
@@ -78,7 +76,7 @@ app.post('/api/transcribe', async (req, res) => {
       text: s.text,
     }));
 
-    console.log('Segmentos:', segments.length);
+    console.log('Segmentos generados:', segments.length);
     res.json({ segments, nextStart: startTime + 600 });
 
   } catch (error) {
