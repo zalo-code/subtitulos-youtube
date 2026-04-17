@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Subtítulos en español by Kenpachi</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #111; color: #fff; }
+    input { width: 70%; padding: 10px; font-size: 16px; }
+    button { padding: 10px 20px; font-size: 16px; background: #e00; color: #fff; border: none; cursor: pointer; }
+    #player { margin-top: 20px; }
+    #subtitulos { margin-top: 10px; background: #000; color: #fff; font-size: 22px; text-align: center; padding: 15px; min-height: 60px; border-radius: 8px; }
+    #estado { margin-top: 10px; color: #aaa; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>🎬 Subtítulos en español</h1>
+  <input id="url" type="text" placeholder="Pega aquí la URL de YouTube..." />
+  <button onclick="cargar()">Cargar</button>
+  <div id="estado"></div>
+  <div id="player"></div>
+  <div id="subtitulos">Los subtítulos aparecerán aquí...</div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script>
+    let player, segments = [], intervalo;
+
+    function cargar() {
+      const url = document.getElementById('url').value;
+      const match = url.match(/(?:v=|youtu\.be\/)([^&\n?#]+)/);
+      if (!match) return alert('URL no válida');
+      const videoId = match[1];
+
+      document.getElementById('estado').textContent = '⏳ Procesando audio... esto puede tardar varios minutos para vídeos largos.';
+      document.getElementById('subtitulos').textContent = 'Cargando...';
+
+      // Cargar el reproductor
+      if (player) player.destroy();
+      document.getElementById('player').innerHTML = '<div id="yt"></div>';
+      player = new YT.Player('yt', {
+        height: '400', width: '100%', videoId,
+        events: { onReady: () => {} }
+      });
+
+      // Llamar al backend
+      fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId })
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        segments = data.segments;
+        document.getElementById('estado').textContent = '✅ Subtítulos listos. Dale al play.';
+        clearInterval(intervalo);
+        intervalo = setInterval(actualizarSub, 500);
+      })
+      .catch(e => {
+        document.getElementById('estado').textContent = '❌ Error: ' + e.message;
+      });
+    }
+
+    function actualizarSub() {
+      if (!player || !player.getCurrentTime) return;
+      const t = player.getCurrentTime();
+      const seg = segments.find(s => t >= s.start && t <= s.end);
+      document.getElementById('subtitulos').textContent = seg ? seg.text : '';
+    }
+  </script>
+</body>
+</html>
