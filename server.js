@@ -26,10 +26,10 @@ app.post('/api/transcribe', async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        audio_url: videoUrl,
-        language_code: 'ca',
-        speech_model: 'best',
-      }),
+      audio_url: videoUrl,
+      language_code: 'ca',
+      speech_models: { default: 'best' },
+    }),
     });
     const submitData = await submitRes.json();
     console.log('AssemblyAI submit:', JSON.stringify(submitData).substring(0, 200));
