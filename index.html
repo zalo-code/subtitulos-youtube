@@ -10,8 +10,11 @@
     #player { margin-top: 20px; }
     #subtitulos { margin-top: 10px; background: #000; color: #fff; font-size: 22px; text-align: center; padding: 15px; min-height: 60px; border-radius: 8px; }
     #estado { margin-top: 10px; color: #aaa; font-size: 14px; }
+    #estado2 { color: #fff; margin-top: 5px; font-size: 14px; }
     #progreso { margin-top: 5px; background: #333; border-radius: 4px; height: 8px; }
     #barra { height: 8px; background: #e00; border-radius: 4px; width: 0%; transition: width 0.5s; }
+    #controles { margin-top: 10px; display: none; }
+    #controles button { margin-right: 10px; background: #333; }
   </style>
 </head>
 <body>
@@ -20,13 +23,18 @@
   <button onclick="cargar()">Cargar</button>
   <div id="estado"></div>
   <div id="progreso"><div id="barra"></div></div>
+  <div id="estado2"></div>
+  <div id="controles">
+    <button onclick="togglePlay()">▶/⏸ Play/Pausa (o Espacio)</button>
+    <button onclick="retrasar()">⏪ -5s</button>
+    <button onclick="adelantar()">⏩ +5s</button>
+  </div>
   <div id="player"></div>
   <div id="subtitulos">Los subtítulos aparecerán aquí...</div>
 
-  <script src="https://www.youtube.com/iframe_api"></script>
   <script>
-    let player, segments = [], intervalo;
-    let tiempoInicio = null, tiempoOffset = 0;
+    let segments = [], intervalo;
+    let reproduciendo = false, tiempoInicio = null, tiempoOffset = 0;
     const DURACION = 7200;
 
     function cargar() {
@@ -36,39 +44,59 @@
       const videoId = match[1];
 
       segments = [];
+      reproduciendo = false;
       tiempoInicio = null;
       tiempoOffset = 0;
+
       document.getElementById('estado').textContent = '⏳ Procesando primer bloque...';
       document.getElementById('subtitulos').textContent = 'Los subtítulos aparecerán aquí...';
       document.getElementById('barra').style.width = '0%';
+      document.getElementById('estado2').textContent = '';
+      document.getElementById('controles').style.display = 'block';
 
-      if (player) player.destroy();
-      document.getElementById('player').innerHTML = '<div id="yt"></div>';
-      player = new YT.Player('yt', {
-        height: '400', width: '100%', videoId,
-        events: {
-          onReady: () => {},
-          onStateChange: (e) => {
-            if (e.data === 1) {
-              // Reproduciendo
-              try { tiempoOffset = player.getCurrentTime() || 0; } catch(err) { tiempoOffset = 0; }
-              tiempoInicio = Date.now();
-            } else if (e.data === 2) {
-              // Pausado
-              if (tiempoInicio !== null) {
-                tiempoOffset = tiempoOffset + (Date.now() - tiempoInicio) / 1000;
-                tiempoInicio = null;
-              }
-            }
-          }
-        }
-      });
+      document.getElementById('player').innerHTML = `
+        <iframe id="yt" width="100%" height="400"
+          src="https://www.youtube.com/embed/${videoId}"
+          frameborder="0" allowfullscreen></iframe>
+      `;
 
       clearInterval(intervalo);
       intervalo = setInterval(actualizarSub, 300);
 
       procesarTrozo(videoId, 0, DURACION);
     }
+
+    function togglePlay() {
+      if (reproduciendo) {
+        tiempoOffset = tiempoOffset + (Date.now() - tiempoInicio) / 1000;
+        tiempoInicio = null;
+        reproduciendo = false;
+        document.getElementById('estado2').textContent = '⏸ Pausado en ' + Math.floor(tiempoOffset) + 's';
+      } else {
+        tiempoInicio = Date.now();
+        reproduciendo = true;
+        document.getElementById('estado2').textContent = '▶ Reproduciendo desde ' + Math.floor(tiempoOffset) + 's';
+      }
+    }
+
+    function retrasar() {
+      tiempoOffset = Math.max(0, tiempoOffset - 5);
+      if (reproduciendo) tiempoInicio = Date.now();
+      document.getElementById('estado2').textContent = '⏪ Ajustado a ' + Math.floor(tiempoOffset) + 's';
+    }
+
+    function adelantar() {
+      tiempoOffset = tiempoOffset + 5;
+      if (reproduciendo) tiempoInicio = Date.now();
+      document.getElementById('estado2').textContent = '⏩ Ajustado a ' + Math.floor(tiempoOffset) + 's';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && e.target === document.body) {
+        e.preventDefault();
+        togglePlay();
+      }
+    });
 
     async function procesarTrozo(videoId, startTime, duracionTotal) {
       try {
@@ -80,10 +108,7 @@
         const data = await res.json();
         if (data.error) {
           document.getElementById('estado').textContent = '❌ Error en bloque ' + startTime + ': ' + data.error;
-          // Intentar siguiente bloque igualmente
-          if (startTime + 600 < duracionTotal) {
-            procesarTrozo(videoId, startTime + 600, duracionTotal);
-          }
+          if (startTime + 600 < duracionTotal) procesarTrozo(videoId, startTime + 600, duracionTotal);
           return;
         }
 
@@ -103,11 +128,9 @@
     }
 
     function actualizarSub() {
-      let t = 0;
-      if (tiempoInicio !== null) {
+      let t = tiempoOffset;
+      if (reproduciendo && tiempoInicio !== null) {
         t = tiempoOffset + (Date.now() - tiempoInicio) / 1000;
-      } else {
-        t = tiempoOffset;
       }
       const seg = segments.find(s => t >= s.start && t <= s.end);
       document.getElementById('subtitulos').textContent = seg ? seg.text : '';
