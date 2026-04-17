@@ -1,6 +1,7 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import YTDlpWrap from 'yt-dlp-wrap';
+import YTDlpWrapModule from 'yt-dlp-wrap';
+const YTDlpWrap = YTDlpWrapModule.default || YTDlpWrapModule;
 import { existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
