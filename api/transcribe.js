@@ -5,12 +5,12 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { videoId } = req.body;
+  const { videoId, startTime = 0 } = req.body;
 
   try {
-    // 1. Iniciar descarga
+    // 1. Iniciar descarga del trozo
     const mp3Res = await fetch(
-      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=1&no_merge=false&audio_language=en`,
+      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=1&no_merge=false&audio_language=en&start_time=${startTime}&end_time=${startTime + 600}`,
       {
         headers: {
           'Content-Type': 'application/json',
@@ -20,33 +20,27 @@ export default async function handler(req, res) {
       }
     );
     const mp3Data = await mp3Res.json();
-    
-    // Log para debug
-    console.log('MP3 response:', JSON.stringify(mp3Data));
-    
     const progressUrl = mp3Data.progress_url;
-    if (!progressUrl) throw new Error('Sin progress_url. Respuesta: ' + JSON.stringify(mp3Data));
+    if (!progressUrl) throw new Error('Sin progress_url: ' + JSON.stringify(mp3Data));
 
-    // 2. Esperar hasta que el audio esté listo
+    // 2. Esperar audio
     let audioUrl = null;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 20; i++) {
       await new Promise(r => setTimeout(r, 3000));
       const progressRes = await fetch(progressUrl);
       const progressData = await progressRes.json();
-      console.log('Progress:', JSON.stringify(progressData));
-      
       if (progressData.url) { audioUrl = progressData.url; break; }
       if (progressData.download_url) { audioUrl = progressData.download_url; break; }
       if (progressData.content) { audioUrl = progressData.content; break; }
     }
-    if (!audioUrl) throw new Error('Timeout esperando el audio');
+    if (!audioUrl) throw new Error('Timeout en trozo ' + startTime);
 
-    // 3. Descargar el audio
+    // 3. Descargar audio
     const audioRes = await fetch(audioUrl);
     const audioBuffer = await audioRes.arrayBuffer();
     const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
 
-    // 4. Transcribir con Groq Whisper
+    // 4. Transcribir con Groq
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.mp3');
     formData.append('model', 'whisper-large-v3');
@@ -63,7 +57,15 @@ export default async function handler(req, res) {
       }
     );
     const groqData = await groqRes.json();
-    res.status(200).json({ segments: groqData.segments });
+    
+    // Ajustar timestamps al tiempo real del vídeo
+    const segments = (groqData.segments || []).map(s => ({
+      ...s,
+      start: s.start + startTime,
+      end: s.end + startTime,
+    }));
+
+    res.status(200).json({ segments, nextStart: startTime + 600 });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
