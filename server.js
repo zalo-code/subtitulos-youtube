@@ -1,7 +1,7 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import { execSync } from 'child_process';
-import { createReadStream, unlinkSync, existsSync } from 'fs';
+import YTDlpWrap from 'yt-dlp-wrap';
+import { existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -16,31 +16,37 @@ app.use((req, res, next) => {
 });
 app.use(express.static('.'));
 
+// Descargar binario de yt-dlp al arrancar
+const ytDlpBinaryPath = join(tmpdir(), 'yt-dlp');
+const ytDlpWrap = new YTDlpWrap(ytDlpBinaryPath);
+
+console.log('Descargando binario yt-dlp...');
+YTDlpWrap.downloadFromGithub(ytDlpBinaryPath).then(() => {
+  console.log('yt-dlp listo en:', ytDlpBinaryPath);
+}).catch(e => console.error('Error descargando yt-dlp:', e.message));
+
 app.post('/api/transcribe', async (req, res) => {
   const { videoId, startTime = 0 } = req.body;
   const outputPath = join(tmpdir(), `audio_${videoId}_${startTime}.mp3`);
   console.log('Procesando:', videoId, 'desde:', startTime);
 
   try {
-    // 1. Descargar audio con yt-dlp
     console.log('Descargando con yt-dlp...');
-    execSync(
-      `yt-dlp -x --audio-format mp3 --audio-quality 128K --download-sections "*${startTime}-${startTime + 600}" --force-keyframes-at-cuts -o "${outputPath}" "https://www.youtube.com/watch?v=${videoId}"`,
-      { timeout: 180000 }
-    );
-    console.log('Audio descargado:', outputPath);
+    await ytDlpWrap.execPromise([
+      `https://www.youtube.com/watch?v=${videoId}`,
+      '-x',
+      '--audio-format', 'mp3',
+      '--audio-quality', '128K',
+      '--download-sections', `*${startTime}-${startTime + 600}`,
+      '--force-keyframes-at-cuts',
+      '-o', outputPath,
+    ]);
+    console.log('Audio descargado');
 
-    // 2. Leer audio
-    const audioBuffer = await new Promise((resolve, reject) => {
-      const chunks = [];
-      const stream = createReadStream(outputPath);
-      stream.on('data', chunk => chunks.push(chunk));
-      stream.on('end', () => resolve(Buffer.concat(chunks)));
-      stream.on('error', reject);
-    });
+    const { readFileSync } = await import('fs');
+    const audioBuffer = readFileSync(outputPath);
     console.log('Audio leído:', audioBuffer.length, 'bytes');
 
-    // 3. Enviar a Groq Whisper
     const boundary = '----FormBoundary' + Math.random().toString(36);
     const bodyParts = [];
     bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3\r\n`));
@@ -66,7 +72,7 @@ app.post('/api/transcribe', async (req, res) => {
       }
     );
     const groqData = await groqRes.json();
-    console.log('Groq respuesta:', JSON.stringify(groqData).substring(0, 300));
+    console.log('Groq:', JSON.stringify(groqData).substring(0, 300));
 
     if (groqData.error) throw new Error('Groq error: ' + JSON.stringify(groqData.error));
 
@@ -76,7 +82,7 @@ app.post('/api/transcribe', async (req, res) => {
       text: s.text,
     }));
 
-    console.log('Segmentos generados:', segments.length);
+    console.log('Segmentos:', segments.length);
     res.json({ segments, nextStart: startTime + 600 });
 
   } catch (error) {
