@@ -1,5 +1,9 @@
 import express from 'express';
 import fetch from 'node-fetch';
+import youtubeDl from 'youtube-dl-exec';
+import { createReadStream, unlinkSync, existsSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 const app = express();
 app.use(express.json());
@@ -14,46 +18,32 @@ app.use(express.static('.'));
 
 app.post('/api/transcribe', async (req, res) => {
   const { videoId, startTime = 0 } = req.body;
+  const outputPath = join(tmpdir(), `audio_${videoId}_${startTime}.mp3`);
   console.log('Procesando:', videoId, 'desde:', startTime);
 
   try {
-    // 1. Iniciar descarga
-    const mp3Res = await fetch(
-      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=1&no_merge=false&audio_language=en&start_time=${startTime}&end_time=${startTime + 600}`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-rapidapi-host': 'youtube-info-download-api.p.rapidapi.com',
-          'x-rapidapi-key': process.env.RAPIDAPI_KEY,
-        }
-      }
-    );
-    const mp3Data = await mp3Res.json();
-    const progressUrl = mp3Data.progress_url;
-    if (!progressUrl) throw new Error('Sin progress_url: ' + JSON.stringify(mp3Data));
+    // 1. Descargar audio con yt-dlp
+    console.log('Descargando con yt-dlp...');
+    await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
+      extractAudio: true,
+      audioFormat: 'mp3',
+      audioQuality: '128K',
+      output: outputPath,
+      noPlaylist: true,
+      postprocessorArgs: `ffmpeg:-ss ${startTime} -t 600`,
+    });
+    console.log('Audio descargado en:', outputPath);
 
-    // 2. Esperar audio
-    let audioUrl = null;
-    for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, 5000));
-      const progressRes = await fetch(progressUrl);
-      const progressData = await progressRes.json();
-      console.log('Progress:', progressData.text, progressData.progress);
-      if (progressData.success === 1 && progressData.download_url) {
-        audioUrl = progressData.download_url;
-        break;
-      }
-    }
-    if (!audioUrl) throw new Error('Timeout en trozo ' + startTime);
-
-    // 3. Descargar audio
-    console.log('Descargando audio:', audioUrl);
-    const audioRes = await fetch(audioUrl);
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-    console.log('Audio descargado:', audioBuffer.length, 'bytes');
-
-    // 4. Enviar a Groq con boundary manual
+    // 2. Enviar a Groq Whisper
     const boundary = '----FormBoundary' + Math.random().toString(36);
+    const audioBuffer = await new Promise((resolve, reject) => {
+      const chunks = [];
+      const stream = createReadStream(outputPath);
+      stream.on('data', chunk => chunks.push(chunk));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
+
     const bodyParts = [];
     bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3\r\n`));
     bodyParts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\nca\r\n`));
@@ -94,6 +84,8 @@ app.post('/api/transcribe', async (req, res) => {
   } catch (error) {
     console.error('Error:', error.message);
     res.status(500).json({ error: error.message });
+  } finally {
+    if (existsSync(outputPath)) unlinkSync(outputPath);
   }
 });
 
