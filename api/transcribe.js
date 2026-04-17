@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   const { videoId } = req.body;
 
   try {
-    // 1. Obtener MP3 de YouTube
+    // 1. Iniciar descarga
     const mp3Res = await fetch(
       `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=false&no_merge=false&audio_language=en`,
       {
@@ -20,14 +20,28 @@ export default async function handler(req, res) {
       }
     );
     const mp3Data = await mp3Res.json();
-    if (!mp3Data.url) throw new Error('No se pudo obtener el audio: ' + JSON.stringify(mp3Data));
+    const progressUrl = mp3Data.progress_url;
+    if (!progressUrl) throw new Error('No se obtuvo progress_url');
 
-    // 2. Descargar el audio
-    const audioRes = await fetch(mp3Data.url);
+    // 2. Esperar hasta que el audio esté listo
+    let audioUrl = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const progressRes = await fetch(progressUrl);
+      const progressData = await progressRes.json();
+      if (progressData.url || progressData.download_url) {
+        audioUrl = progressData.url || progressData.download_url;
+        break;
+      }
+    }
+    if (!audioUrl) throw new Error('Timeout esperando el audio');
+
+    // 3. Descargar el audio
+    const audioRes = await fetch(audioUrl);
     const audioBuffer = await audioRes.arrayBuffer();
     const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
 
-    // 3. Transcribir con Groq Whisper
+    // 4. Transcribir con Groq Whisper
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.mp3');
     formData.append('model', 'whisper-large-v3');
