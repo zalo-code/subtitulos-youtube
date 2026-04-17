@@ -1,8 +1,7 @@
 import express from 'express';
 import fetch from 'node-fetch';
-import YTDlpWrapModule from 'yt-dlp-wrap';
-const YTDlpWrap = YTDlpWrapModule.default || YTDlpWrapModule;
-import { existsSync, unlinkSync } from 'fs';
+import { execSync } from 'child_process';
+import { readFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -17,15 +16,6 @@ app.use((req, res, next) => {
 });
 app.use(express.static('.'));
 
-// Descargar binario de yt-dlp al arrancar
-const ytDlpBinaryPath = join(tmpdir(), 'yt-dlp');
-const ytDlpWrap = new YTDlpWrap(ytDlpBinaryPath);
-
-console.log('Descargando binario yt-dlp...');
-YTDlpWrap.downloadFromGithub(ytDlpBinaryPath).then(() => {
-  console.log('yt-dlp listo en:', ytDlpBinaryPath);
-}).catch(e => console.error('Error descargando yt-dlp:', e.message));
-
 app.post('/api/transcribe', async (req, res) => {
   const { videoId, startTime = 0 } = req.body;
   const outputPath = join(tmpdir(), `audio_${videoId}_${startTime}.mp3`);
@@ -33,18 +23,12 @@ app.post('/api/transcribe', async (req, res) => {
 
   try {
     console.log('Descargando con yt-dlp...');
-    await ytDlpWrap.execPromise([
-      `https://www.youtube.com/watch?v=${videoId}`,
-      '-x',
-      '--audio-format', 'mp3',
-      '--audio-quality', '128K',
-      '--download-sections', `*${startTime}-${startTime + 600}`,
-      '--force-keyframes-at-cuts',
-      '-o', outputPath,
-    ]);
+    execSync(
+      `yt-dlp -x --audio-format mp3 --audio-quality 128K --download-sections "*${startTime}-${startTime + 600}" --force-keyframes-at-cuts -o "${outputPath}" "https://www.youtube.com/watch?v=${videoId}"`,
+      { timeout: 180000, stdio: 'pipe' }
+    );
     console.log('Audio descargado');
 
-    const { readFileSync } = await import('fs');
     const audioBuffer = readFileSync(outputPath);
     console.log('Audio leído:', audioBuffer.length, 'bytes');
 
