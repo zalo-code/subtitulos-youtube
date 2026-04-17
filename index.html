@@ -26,7 +26,8 @@
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
     let player, segments = [], intervalo;
-    const DURACION = 7200; // 2 horas en segundos
+    let tiempoInicio = null, tiempoOffset = 0;
+    const DURACION = 7200;
 
     function cargar() {
       const url = document.getElementById('url').value;
@@ -35,19 +36,36 @@
       const videoId = match[1];
 
       segments = [];
+      tiempoInicio = null;
+      tiempoOffset = 0;
       document.getElementById('estado').textContent = '⏳ Procesando primer bloque...';
-      document.getElementById('subtitulos').textContent = 'Cargando...';
+      document.getElementById('subtitulos').textContent = 'Los subtítulos aparecerán aquí...';
       document.getElementById('barra').style.width = '0%';
 
       if (player) player.destroy();
       document.getElementById('player').innerHTML = '<div id="yt"></div>';
       player = new YT.Player('yt', {
         height: '400', width: '100%', videoId,
-        events: { onReady: () => {} }
+        events: {
+          onReady: () => {},
+          onStateChange: (e) => {
+            if (e.data === 1) {
+              // Reproduciendo
+              try { tiempoOffset = player.getCurrentTime() || 0; } catch(err) { tiempoOffset = 0; }
+              tiempoInicio = Date.now();
+            } else if (e.data === 2) {
+              // Pausado
+              if (tiempoInicio !== null) {
+                tiempoOffset = tiempoOffset + (Date.now() - tiempoInicio) / 1000;
+                tiempoInicio = null;
+              }
+            }
+          }
+        }
       });
 
       clearInterval(intervalo);
-      intervalo = setInterval(actualizarSub, 500);
+      intervalo = setInterval(actualizarSub, 300);
 
       procesarTrozo(videoId, 0, DURACION);
     }
@@ -62,6 +80,10 @@
         const data = await res.json();
         if (data.error) {
           document.getElementById('estado').textContent = '❌ Error en bloque ' + startTime + ': ' + data.error;
+          // Intentar siguiente bloque igualmente
+          if (startTime + 600 < duracionTotal) {
+            procesarTrozo(videoId, startTime + 600, duracionTotal);
+          }
           return;
         }
 
@@ -73,7 +95,7 @@
         if (data.nextStart < duracionTotal) {
           procesarTrozo(videoId, data.nextStart, duracionTotal);
         } else {
-          document.getElementById('estado').textContent = '✅ Todo listo. Dale al play.';
+          document.getElementById('estado').textContent = '✅ Todo listo.';
         }
       } catch(e) {
         document.getElementById('estado').textContent = '❌ Error: ' + e.message;
@@ -81,8 +103,12 @@
     }
 
     function actualizarSub() {
-      if (!player || !player.getCurrentTime) return;
-      const t = player.getCurrentTime();
+      let t = 0;
+      if (tiempoInicio !== null) {
+        t = tiempoOffset + (Date.now() - tiempoInicio) / 1000;
+      } else {
+        t = tiempoOffset;
+      }
       const seg = segments.find(s => t >= s.start && t <= s.end);
       document.getElementById('subtitulos').textContent = seg ? seg.text : '';
     }
