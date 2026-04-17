@@ -20,8 +20,12 @@ export default async function handler(req, res) {
       }
     );
     const mp3Data = await mp3Res.json();
+    
+    // Log para debug
+    console.log('MP3 response:', JSON.stringify(mp3Data));
+    
     const progressUrl = mp3Data.progress_url;
-    if (!progressUrl) throw new Error('No se obtuvo progress_url');
+    if (!progressUrl) throw new Error('Sin progress_url. Respuesta: ' + JSON.stringify(mp3Data));
 
     // 2. Esperar hasta que el audio esté listo
     let audioUrl = null;
@@ -29,10 +33,11 @@ export default async function handler(req, res) {
       await new Promise(r => setTimeout(r, 3000));
       const progressRes = await fetch(progressUrl);
       const progressData = await progressRes.json();
-      if (progressData.url || progressData.download_url) {
-        audioUrl = progressData.url || progressData.download_url;
-        break;
-      }
+      console.log('Progress:', JSON.stringify(progressData));
+      
+      if (progressData.url) { audioUrl = progressData.url; break; }
+      if (progressData.download_url) { audioUrl = progressData.download_url; break; }
+      if (progressData.content) { audioUrl = progressData.content; break; }
     }
     if (!audioUrl) throw new Error('Timeout esperando el audio');
 
