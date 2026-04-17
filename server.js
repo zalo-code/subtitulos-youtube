@@ -14,11 +14,44 @@ app.use(express.static('.'));
 
 app.post('/api/transcribe', async (req, res) => {
   const { videoId } = req.body;
-  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  console.log('Procesando:', videoUrl);
+  console.log('Procesando:', videoId);
 
   try {
-    // 1. Enviar a AssemblyAI
+    // 1. Obtener URL directa del audio via RapidAPI
+    console.log('Obteniendo audio de RapidAPI...');
+    const mp3Res = await fetch(
+      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=1&no_merge=false&audio_language=en`,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-rapidapi-host': 'youtube-info-download-api.p.rapidapi.com',
+          'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+        }
+      }
+    );
+    const mp3Data = await mp3Res.json();
+    console.log('RapidAPI response:', JSON.stringify(mp3Data).substring(0, 200));
+
+    const progressUrl = mp3Data.progress_url;
+    if (!progressUrl) throw new Error('Sin progress_url: ' + JSON.stringify(mp3Data));
+
+    // 2. Esperar audio listo
+    let audioUrl = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const progressRes = await fetch(progressUrl);
+      const progressData = await progressRes.json();
+      console.log('Progress:', progressData.text, progressData.progress);
+      if (progressData.success === 1 && progressData.download_url) {
+        audioUrl = progressData.download_url;
+        console.log('Audio URL:', audioUrl);
+        break;
+      }
+    }
+    if (!audioUrl) throw new Error('Timeout obteniendo audio');
+
+    // 3. Enviar URL directa a AssemblyAI
+    console.log('Enviando a AssemblyAI...');
     const submitRes = await fetch('https://api.assemblyai.com/v2/transcript', {
       method: 'POST',
       headers: {
@@ -26,18 +59,17 @@ app.post('/api/transcribe', async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-      audio_url: videoUrl,
-      language_code: 'ca',
-      speech_models: ['universal-2'],
-    }),
+        audio_url: audioUrl,
+        language_code: 'ca',
+        speech_models: ['universal-2'],
+      }),
     });
     const submitData = await submitRes.json();
     console.log('AssemblyAI submit:', JSON.stringify(submitData).substring(0, 200));
-    
     if (submitData.error) throw new Error('AssemblyAI error: ' + submitData.error);
     const transcriptId = submitData.id;
 
-    // 2. Esperar resultado
+    // 4. Esperar transcripción
     let transcript = null;
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 10000));
@@ -46,7 +78,6 @@ app.post('/api/transcribe', async (req, res) => {
       });
       const pollData = await pollRes.json();
       console.log('Estado:', pollData.status);
-      
       if (pollData.status === 'completed') {
         transcript = pollData;
         break;
@@ -56,19 +87,19 @@ app.post('/api/transcribe', async (req, res) => {
     }
     if (!transcript) throw new Error('Timeout esperando transcripción');
 
-    // 3. Traducir al español con Groq
+    // 5. Traducir al español con Groq en chunks
+    console.log('Traduciendo con Groq...');
     const words = transcript.words || [];
     const segments = [];
     let chunk = [];
-    
+
     for (const word of words) {
       chunk.push(word);
       if (chunk.length >= 20 || word.text.includes('.') || word.text.includes(',')) {
         const text = chunk.map(w => w.text).join(' ');
         const start = chunk[0].start / 1000;
         const end = chunk[chunk.length - 1].end / 1000;
-        
-        // Traducir con Groq
+
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -86,7 +117,6 @@ app.post('/api/transcribe', async (req, res) => {
         });
         const groqData = await groqRes.json();
         const translated = groqData.choices?.[0]?.message?.content || text;
-        
         segments.push({ start, end, text: translated });
         chunk = [];
       }
@@ -103,4 +133,3 @@ app.post('/api/transcribe', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
-
