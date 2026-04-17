@@ -72,7 +72,7 @@
 
     async function procesarTrozo(videoId, startTime, duracionTotal) {
       try {
-        const res = await fetch('/api/transcribe', {
+        const res = await fetch('https://subtitulos-youtube-production.up.railway.app/api/transcribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ videoId, startTime })
