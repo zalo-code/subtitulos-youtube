@@ -17,7 +17,7 @@ app.post('/api/transcribe', async (req, res) => {
   console.log('Procesando:', videoId);
 
   try {
-    // 1. Obtener URL directa del audio
+    // 1. Obtener URL del audio
     console.log('Obteniendo audio...');
     const mp3Res = await fetch(
       `https://youtube-mp36.p.rapidapi.com/dl?id=${videoId}`,
@@ -30,13 +30,32 @@ app.post('/api/transcribe', async (req, res) => {
       }
     );
     const mp3Data = await mp3Res.json();
-    console.log('MP3 response:', JSON.stringify(mp3Data).substring(0, 200));
     if (!mp3Data.link) throw new Error('Sin link: ' + JSON.stringify(mp3Data));
-    const audioUrl = mp3Data.link;
-    console.log('Audio URL:', audioUrl);
+    console.log('Audio URL obtenida');
 
-    // 2. Enviar URL a AssemblyAI
-    console.log('Enviando a AssemblyAI...');
+    // 2. Descargar el audio
+    console.log('Descargando audio...');
+    const audioRes = await fetch(mp3Data.link);
+    if (!audioRes.ok) throw new Error('Error descargando audio: ' + audioRes.status);
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+    console.log('Audio descargado:', audioBuffer.length, 'bytes');
+
+    // 3. Subir audio a AssemblyAI
+    console.log('Subiendo a AssemblyAI...');
+    const uploadRes = await fetch('https://api.assemblyai.com/v2/upload', {
+      method: 'POST',
+      headers: {
+        'Authorization': process.env.ASSEMBLYAI_KEY,
+        'Content-Type': 'application/octet-stream',
+      },
+      body: audioBuffer,
+    });
+    const uploadData = await uploadRes.json();
+    console.log('Upload response:', JSON.stringify(uploadData).substring(0, 200));
+    if (!uploadData.upload_url) throw new Error('Error subiendo audio: ' + JSON.stringify(uploadData));
+
+    // 4. Transcribir
+    console.log('Transcribiendo...');
     const submitRes = await fetch('https://api.assemblyai.com/v2/transcript', {
       method: 'POST',
       headers: {
@@ -44,7 +63,7 @@ app.post('/api/transcribe', async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        audio_url: audioUrl,
+        audio_url: uploadData.upload_url,
         language_code: 'ca',
         speech_models: ['universal-2'],
       }),
@@ -54,9 +73,9 @@ app.post('/api/transcribe', async (req, res) => {
     if (submitData.error) throw new Error('AssemblyAI error: ' + submitData.error);
     const transcriptId = submitData.id;
 
-    // 3. Esperar transcripción
+    // 5. Esperar transcripción
     let transcript = null;
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 120; i++) {
       await new Promise(r => setTimeout(r, 10000));
       const pollRes = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
         headers: { 'Authorization': process.env.ASSEMBLYAI_KEY },
@@ -72,7 +91,7 @@ app.post('/api/transcribe', async (req, res) => {
     }
     if (!transcript) throw new Error('Timeout esperando transcripción');
 
-    // 4. Traducir al español con Groq
+    // 6. Traducir al español con Groq
     console.log('Traduciendo...');
     const words = transcript.words || [];
     const segments = [];
