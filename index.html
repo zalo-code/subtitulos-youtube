@@ -35,7 +35,6 @@
   <script>
     let segments = [], intervalo;
     let reproduciendo = false, tiempoInicio = null, tiempoOffset = 0;
-    const DURACION = 7200;
 
     function cargar() {
       const url = document.getElementById('url').value;
@@ -48,7 +47,7 @@
       tiempoInicio = null;
       tiempoOffset = 0;
 
-      document.getElementById('estado').textContent = '⏳ Procesando primer bloque...';
+      document.getElementById('estado').textContent = '⏳ Procesando vídeo... puede tardar varios minutos.';
       document.getElementById('subtitulos').textContent = 'Los subtítulos aparecerán aquí...';
       document.getElementById('barra').style.width = '0%';
       document.getElementById('estado2').textContent = '';
@@ -63,7 +62,27 @@
       clearInterval(intervalo);
       intervalo = setInterval(actualizarSub, 300);
 
-      procesarTrozo(videoId, 0, DURACION);
+      cargarSubtitulos(videoId);
+    }
+
+    async function cargarSubtitulos(videoId) {
+      try {
+        const res = await fetch('https://subtitulos-youtube-production.up.railway.app/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId })
+        });
+        const data = await res.json();
+        if (data.error) {
+          document.getElementById('estado').textContent = '❌ Error: ' + data.error;
+          return;
+        }
+        segments = data.segments || [];
+        document.getElementById('barra').style.width = '100%';
+        document.getElementById('estado').textContent = '✅ Subtítulos listos. Dale al play y pulsa ▶ para sincronizar.';
+      } catch(e) {
+        document.getElementById('estado').textContent = '❌ Error: ' + e.message;
+      }
     }
 
     function togglePlay() {
@@ -97,35 +116,6 @@
         togglePlay();
       }
     });
-
-    async function procesarTrozo(videoId, startTime, duracionTotal) {
-      try {
-        const res = await fetch('https://subtitulos-youtube-production.up.railway.app/api/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ videoId, startTime })
-        });
-        const data = await res.json();
-        if (data.error) {
-          document.getElementById('estado').textContent = '❌ Error en bloque ' + startTime + ': ' + data.error;
-          if (startTime + 600 < duracionTotal) procesarTrozo(videoId, startTime + 600, duracionTotal);
-          return;
-        }
-
-        segments = segments.concat(data.segments || []);
-        const pct = Math.min(100, Math.round((data.nextStart / duracionTotal) * 100));
-        document.getElementById('barra').style.width = pct + '%';
-        document.getElementById('estado').textContent = `✅ Procesado hasta ${Math.floor(data.nextStart/60)} min. Cargando más...`;
-
-        if (data.nextStart < duracionTotal) {
-          procesarTrozo(videoId, data.nextStart, duracionTotal);
-        } else {
-          document.getElementById('estado').textContent = '✅ Todo listo.';
-        }
-      } catch(e) {
-        document.getElementById('estado').textContent = '❌ Error: ' + e.message;
-      }
-    }
 
     function actualizarSub() {
       let t = tiempoOffset;
