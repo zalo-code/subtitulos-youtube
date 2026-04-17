@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Subtítulos en español by Kenpachi</title>
+  <title>Subtítulos en español</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #111; color: #fff; }
     input { width: 70%; padding: 10px; font-size: 16px; }
@@ -10,19 +10,23 @@
     #player { margin-top: 20px; }
     #subtitulos { margin-top: 10px; background: #000; color: #fff; font-size: 22px; text-align: center; padding: 15px; min-height: 60px; border-radius: 8px; }
     #estado { margin-top: 10px; color: #aaa; font-size: 14px; }
+    #progreso { margin-top: 5px; background: #333; border-radius: 4px; height: 8px; }
+    #barra { height: 8px; background: #e00; border-radius: 4px; width: 0%; transition: width 0.5s; }
   </style>
 </head>
 <body>
-  <h1>🎬 Subtítulos en español</h1>
+  <h1>🎬 Subtítulos en español by Tenpayaky</h1>
   <input id="url" type="text" placeholder="Pega aquí la URL de YouTube..." />
   <button onclick="cargar()">Cargar</button>
   <div id="estado"></div>
+  <div id="progreso"><div id="barra"></div></div>
   <div id="player"></div>
   <div id="subtitulos">Los subtítulos aparecerán aquí...</div>
 
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
     let player, segments = [], intervalo;
+    const DURACION = 7200; // 2 horas en segundos
 
     function cargar() {
       const url = document.getElementById('url').value;
@@ -30,10 +34,11 @@
       if (!match) return alert('URL no válida');
       const videoId = match[1];
 
-      document.getElementById('estado').textContent = '⏳ Procesando audio... esto puede tardar varios minutos para vídeos largos.';
+      segments = [];
+      document.getElementById('estado').textContent = '⏳ Procesando primer bloque...';
       document.getElementById('subtitulos').textContent = 'Cargando...';
+      document.getElementById('barra').style.width = '0%';
 
-      // Cargar el reproductor
       if (player) player.destroy();
       document.getElementById('player').innerHTML = '<div id="yt"></div>';
       player = new YT.Player('yt', {
@@ -41,23 +46,38 @@
         events: { onReady: () => {} }
       });
 
-      // Llamar al backend
-      fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoId })
-      })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        segments = data.segments;
-        document.getElementById('estado').textContent = '✅ Subtítulos listos. Dale al play.';
-        clearInterval(intervalo);
-        intervalo = setInterval(actualizarSub, 500);
-      })
-      .catch(e => {
+      clearInterval(intervalo);
+      intervalo = setInterval(actualizarSub, 500);
+
+      procesarTrozo(videoId, 0, DURACION);
+    }
+
+    async function procesarTrozo(videoId, startTime, duracionTotal) {
+      try {
+        const res = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId, startTime })
+        });
+        const data = await res.json();
+        if (data.error) {
+          document.getElementById('estado').textContent = '❌ Error en bloque ' + startTime + ': ' + data.error;
+          return;
+        }
+
+        segments = segments.concat(data.segments || []);
+        const pct = Math.min(100, Math.round((data.nextStart / duracionTotal) * 100));
+        document.getElementById('barra').style.width = pct + '%';
+        document.getElementById('estado').textContent = `✅ Procesado hasta ${Math.floor(data.nextStart/60)} min. Cargando más...`;
+
+        if (data.nextStart < duracionTotal) {
+          procesarTrozo(videoId, data.nextStart, duracionTotal);
+        } else {
+          document.getElementById('estado').textContent = '✅ Todo listo. Dale al play.';
+        }
+      } catch(e) {
         document.getElementById('estado').textContent = '❌ Error: ' + e.message;
-      });
+      }
     }
 
     function actualizarSub() {
