@@ -10,19 +10,20 @@ export default async function handler(req, res) {
   try {
     // 1. Obtener MP3 de YouTube
     const mp3Res = await fetch(
-      `https://youtube-mp36.p.rapidapi.com/dl?id=${videoId}`,
+      `https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=mp3&add_info=0&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${videoId}&audio_quality=128&allow_extended_duration=false&no_merge=false&audio_language=en`,
       {
         headers: {
-          'x-rapidapi-host': 'youtube-mp36.p.rapidapi.com',
+          'Content-Type': 'application/json',
+          'x-rapidapi-host': 'youtube-info-download-api.p.rapidapi.com',
           'x-rapidapi-key': process.env.RAPIDAPI_KEY,
         }
       }
     );
     const mp3Data = await mp3Res.json();
-    if (!mp3Data.link) throw new Error('No se pudo obtener el audio');
+    if (!mp3Data.url) throw new Error('No se pudo obtener el audio: ' + JSON.stringify(mp3Data));
 
     // 2. Descargar el audio
-    const audioRes = await fetch(mp3Data.link);
+    const audioRes = await fetch(mp3Data.url);
     const audioBuffer = await audioRes.arrayBuffer();
     const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
 
@@ -31,7 +32,7 @@ export default async function handler(req, res) {
     formData.append('file', audioBlob, 'audio.mp3');
     formData.append('model', 'whisper-large-v3');
     formData.append('language', 'ca');
-    formData.append('task', 'translate'); // traduce al inglés
+    formData.append('task', 'translate');
     formData.append('response_format', 'verbose_json');
 
     const groqRes = await fetch(
