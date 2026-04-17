@@ -28,7 +28,6 @@ app.post('/api/transcribe', async (req, res) => {
       body: JSON.stringify({
       audio_url: videoUrl,
       language_code: 'ca',
-      speech_models: { default: 'best' },
     }),
     });
     const submitData = await submitRes.json();
